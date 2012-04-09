@@ -19,7 +19,9 @@
 --
 -- * Image format parsing is determined by the filepath extension type.
 --
--- Example: read a .png file into a 3D repa array, and write it out as a .jpg
+-- * Only RGB, RGBA and Greyscale images are supported.
+--
+-- Example: read a .png file into a repa array, and write it out as a .jpg
 --
 -- > main = runIL $ do
 -- >          x <- readImage "/tmp/y.png" 
@@ -39,7 +41,7 @@ module Data.Array.Repa.IO.DevIL (
     , IL, runIL
 
     -- * Image IO 
-    , readImage{-, writeImage-}
+    , readImage, writeImage
     ) where
 
 import Debug.Trace
@@ -52,15 +54,15 @@ import Data.Int
 import Data.Word
 
 import Foreign.C.String (CString, withCString)
-import Foreign.ForeignPtr (FinalizerPtr)
+import Foreign.ForeignPtr (FinalizerPtr, withForeignPtr)
 import Foreign.Concurrent (newForeignPtr)
 import Foreign.Marshal.Alloc (alloca)
-import Foreign.Ptr (Ptr, FunPtr, freeHaskellFunPtr)
+import Foreign.Ptr (Ptr, FunPtr, freeHaskellFunPtr, castPtr)
 import Foreign.Storable (peek)
 import Foreign.Marshal.Utils (with)
 
-import Data.Array.Repa (Array (..), Z (..), (:.) (..), DIM2, DIM3)
-import Data.Array.Repa.Repr.ForeignPtr (F, fromForeignPtr, toForeignPtr)
+import Data.Array.Repa (Array (..), Z (..), (:.) (..), DIM2, DIM3, extent)
+import Data.Array.Repa.Repr.ForeignPtr (F (..), fromForeignPtr, toForeignPtr)
 
 #include "IL/il.h"
 
@@ -76,13 +78,13 @@ newtype ImageName = ImageName { fromImageName :: ILuint }
 
 -- ----------------------------------------------------------------------
 
--- | The RGBA and RGB images are 3D repa arrays where indices are 
+-- | RGBA and RGB images are 3D repa arrays where indices are 
 -- /Z :. row :. column :. color channel/. Grey images are 2D repa arrays.
 -- 
 -- The origin (/Z :. 0 :. 0/) is on the lower left point of the image.
-data Image = RGBA (Array F DIM3 Word8)
-           | RGB (Array F DIM3 Word8)
-           | Grey (Array F DIM2 Word8)
+data Image r = RGBA (Array r DIM3 Word8)
+             | RGB (Array r DIM3 Word8)
+             | Grey (Array r DIM2 Word8)
 
 -- | The IL monad. Provides statically-guaranteed access to an initialized IL
 -- context.
@@ -96,11 +98,7 @@ runIL :: IL a -> IO a
 runIL (IL a) = ilInit >> a
 {-# INLINE runIL #-}
 
-test (RGB i) = "RGB"
-test (RGBA i) = "RGBA"
-test (Grey i) = "Grey"
-
--- | Reads an image into an RGBA array. It uses directly the C array using the
+-- | Reads an image into a repa array. It uses directly the C array using the
 -- repa\'s foreign arrays wrapper.
 -- 
 -- Example:
@@ -110,23 +108,35 @@ test (Grey i) = "Grey"
 -- >    .. operations on x ..
 -- 
 -- /Note:/ The image input type is determined by the filename extension. 
-readImage  :: FilePath -> IL Image
+readImage  :: FilePath -> IL (Image F)
 readImage f = liftIO $ do
     name <- ilGenImageName
     ilBindImage name
+
     success <- ilLoadImage f
     when (not success) $
        error "Unable to load the image."
-    toRepa name
-{-# INLINE readImage #-}
 
--- -- | Writes an RGBA array to a file. Indices are the row, column, and color-channel.
--- -- 
--- -- /Note:/ The image output type is determined by the filename extension. 
--- writeImage :: FilePath -> R.Array DIM3 Word8 -> IL ()
--- writeImage f a = do
---     liftIO $ D.writeImage f (fromRepa a)
--- {-# INLINE writeImage #-}
+    toRepa name
+
+-- | Writes an 'Image' to a file. The image array must be represented as foreign
+-- buffers. You can use 'copyS' or 'copyP' to convert the array.
+-- 
+-- /Note:/ The image output type is determined by the filename extension. 
+writeImage :: FilePath -> Image F -> IL ()
+writeImage f i = liftIO $ do
+    name <- ilGenImageName
+    ilBindImage name
+
+    success <- fromRepa i
+    when (not success) $
+        error "Unable to copy the image to the DevIL buffer."
+
+    success <- ilSaveImage f
+    when (not success) $
+        error "Unable to the save the image to the file."
+
+    ilDeleteImage name
 
 -- ----------------------------------------------------------------------
 
@@ -177,14 +187,15 @@ il_RGBA = (#const IL_RGBA) :: ILint
 il_LUMINANCE = (#const IL_LUMINANCE) :: ILint
 
 il_IMAGE_HEIGHT = (#const IL_IMAGE_HEIGHT) :: ILenum
-il_IMAGE_WIDTH  = (#const IL_IMAGE_WIDTH)  :: ILenum
+il_IMAGE_WIDTH = (#const IL_IMAGE_WIDTH) :: ILenum
+il_IMAGE_FORMAT = (#const IL_IMAGE_FORMAT) :: ILenum
+il_PALETTE_BPP = (#const IL_PALETTE_BPP) :: ILenum
 il_UNSIGNED_BYTE = (#const IL_UNSIGNED_BYTE) :: ILenum
-il_IMAGE_FORMAT  = (#const IL_IMAGE_FORMAT)  :: ILenum
 
 foreign import ccall "ilGetData" ilGetDataC :: IO (Ptr ILubyte)
 
--- | Puts the current image inside an repa array.
-toRepa :: ImageName -> IO Image
+-- | Puts the current image inside a repa array.
+toRepa :: ImageName -> IO (Image F)
 toRepa name = do
     width' <- ilGetIntegerC il_IMAGE_WIDTH
     height' <- ilGetIntegerC il_IMAGE_HEIGHT
@@ -193,33 +204,61 @@ toRepa name = do
     pixels <- ilGetDataC
     
     -- Destroys the image when the array will be garbage collected
-    managedPixels <- newForeignPtr pixels (imageFinalizer name) 
+    managedPixels <- newForeignPtr pixels (ilDeleteImage name) 
     
-    print format
-    print il_RGB
-    print il_RGBA
-    print il_LUMINANCE
-    
-    case format of
-        _ | format == il_RGB       -> do
-            print 2
-            let arr = fromForeignPtr (Z :. height :. width :. 3) managedPixels
-            return $! RGB arr
-          | format == il_RGBA      -> do
-            print 1
-            let arr = fromForeignPtr (Z :. height :. width :. 4) managedPixels
-            return $! RGBA arr
-          | format == il_LUMINANCE -> do
-            let arr = fromForeignPtr (Z :. height :. width) managedPixels
-            return $! Grey arr
-          | otherwise              -> error "Unsupported image format."
+    return $! imageFromFormat format width height managedPixels
+  where
+    -- Create an 'Image' object with the right format.
+    imageFromFormat format width height managedPixels
+        | format == il_RGB       =
+            RGB  $! fromForeignPtr (Z :. height :. width :. 3) managedPixels
+        | format == il_RGBA      =
+            RGBA $! fromForeignPtr (Z :. height :. width :. 4) managedPixels
+        | format == il_LUMINANCE =
+            Grey $! fromForeignPtr (Z :. height :. width) managedPixels
+        | otherwise              =
+            error "Unsupported image format."
+    {-# INLINE imageFromFormat #-}
+
+foreign import ccall "ilTexImage" ilTexImageC
+    :: ILuint -> ILuint -> ILuint   -- w h depth
+    -> ILubyte -> ILenum -> ILenum  -- numberOfChannels format type
+    -> Ptr ()                       -- data (copy from this pointer)
+    -> IO ILboolean
+
+-- | Copies the repa array to the current image buffer.
+fromRepa :: Image F -> IO Bool
+fromRepa (RGB i)  =
+    let Z :. h :. w :. c = extent i 
+    in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
+            ilTexImageC (fromIntegral w) (fromIntegral h) 1 3 
+                        (fromIntegral il_RGB) il_UNSIGNED_BYTE (castPtr p))
+fromRepa (RGBA i) =
+    let Z :. h :. w :. c = extent i 
+    in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
+            ilTexImageC (fromIntegral w) (fromIntegral h) 1 4 
+                        (fromIntegral il_RGBA) il_UNSIGNED_BYTE (castPtr p))
+fromRepa (Grey i) =
+    let Z :. h :. w = extent i 
+    in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
+            ilTexImageC (fromIntegral w) (fromIntegral h) 1 1 
+                        (fromIntegral il_LUMINANCE) il_UNSIGNED_BYTE 
+                        (castPtr p))
+
+foreign import ccall "ilSaveImage" ilSaveImageC :: CString -> IO ILboolean
+
+-- | Saves the current image.
+ilSaveImage :: FilePath -> IO Bool
+ilSaveImage file = do
+    (0 /=) <$> withCString file ilSaveImageC
+{-# INLINE ilSaveImage #-}
 
 foreign import ccall "ilDeleteImages" ilDeleteImagesC
     :: ILsizei -> Ptr ILuint -> IO ()
 
--- | Releases the image when the repa array has been garbage collected.
-imageFinalizer :: ImageName -> IO ()
-imageFinalizer (ImageName name) = do
-    trace ("Free " ++ show name) $ return ()
+-- | Releases an image with its name.
+ilDeleteImage :: ImageName -> IO ()
+ilDeleteImage (ImageName name) =
     with name $ \pName ->
         ilDeleteImagesC 1 pName
+{-# INLINE ilDeleteImage #-}
