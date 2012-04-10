@@ -34,28 +34,28 @@ Category:            Data Structures
 Build-type:          Simple
 Cabal-version:       >=1.6
 
+
 Library
-  Exposed-modules:     
--- Note: future versions will use their own binding
---    Image.DevIL.Base
+  Exposed-modules:
     Data.Array.Repa.IO.DevIL
   
-  -- Packages needed in order to build this package.
   Build-depends:       
     base              >= 4.5,
-    repa              >= 3.1.0.1 && < 4.0,
+    repa              >= 3.1.0.0 && < 4.0,
     transformers      >= 0.2 && < 0.3
   
   Build-tools:
     hsc2hs
+    
+  GHC-Options: -O2 -Wall
   
   Extensions:
     CPP,
     ForeignFunctionInterface
 
---  Extra-Libraries: IL
+  Extra-Libraries: 
+    IL
 
 source-repository head
   type:     git
   location: https://github.com/RaphaelJ/repa-devil
-

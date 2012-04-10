@@ -44,8 +44,6 @@ module Data.Array.Repa.IO.DevIL (
     , readImage, writeImage
     ) where
 
-import Debug.Trace
-
 import Control.Applicative ((<$>))
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO (..))
@@ -54,15 +52,15 @@ import Data.Int
 import Data.Word
 
 import Foreign.C.String (CString, withCString)
-import Foreign.ForeignPtr (FinalizerPtr, withForeignPtr)
+import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Concurrent (newForeignPtr)
 import Foreign.Marshal.Alloc (alloca)
-import Foreign.Ptr (Ptr, FunPtr, freeHaskellFunPtr, castPtr)
+import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (peek)
 import Foreign.Marshal.Utils (with)
 
 import Data.Array.Repa (Array (..), Z (..), (:.) (..), DIM2, DIM3, extent)
-import Data.Array.Repa.Repr.ForeignPtr (F (..), fromForeignPtr, toForeignPtr)
+import Data.Array.Repa.Repr.ForeignPtr (F, fromForeignPtr, toForeignPtr)
 
 #include "IL/il.h"
 
@@ -74,7 +72,7 @@ type ILint     = #type ILint
 type ILubyte   = #type ILubyte
 
 -- DevIL uses unsigned integers as names for each image in processing.
-newtype ImageName = ImageName { fromImageName :: ILuint }
+newtype ImageName = ImageName ILuint
 
 -- ----------------------------------------------------------------------
 
@@ -88,7 +86,7 @@ data Image r = RGBA (Array r DIM3 Word8)
 
 -- | The IL monad. Provides statically-guaranteed access to an initialized IL
 -- context.
-newtype IL a = IL { unIL :: IO a }
+newtype IL a = IL (IO a)
     deriving (Monad, MonadIO)
 
 -- | Running code in the /IL/ monad. This is a simple wrapper over /IO/
@@ -128,12 +126,12 @@ writeImage f i = liftIO $ do
     name <- ilGenImageName
     ilBindImage name
 
-    success <- fromRepa i
-    when (not success) $
+    successCopy <- fromRepa i
+    when (not successCopy) $
         error "Unable to copy the image to the DevIL buffer."
 
-    success <- ilSaveImage f
-    when (not success) $
+    successSave <- ilSaveImage f
+    when (not successSave) $
         error "Unable to the save the image to the file."
 
     ilDeleteImage name
@@ -189,7 +187,6 @@ il_LUMINANCE = (#const IL_LUMINANCE) :: ILint
 il_IMAGE_HEIGHT = (#const IL_IMAGE_HEIGHT) :: ILenum
 il_IMAGE_WIDTH = (#const IL_IMAGE_WIDTH) :: ILenum
 il_IMAGE_FORMAT = (#const IL_IMAGE_FORMAT) :: ILenum
-il_PALETTE_BPP = (#const IL_PALETTE_BPP) :: ILenum
 il_UNSIGNED_BYTE = (#const IL_UNSIGNED_BYTE) :: ILenum
 
 foreign import ccall "ilGetData" ilGetDataC :: IO (Ptr ILubyte)
@@ -229,12 +226,12 @@ foreign import ccall "ilTexImage" ilTexImageC
 -- | Copies the repa array to the current image buffer.
 fromRepa :: Image F -> IO Bool
 fromRepa (RGB i)  =
-    let Z :. h :. w :. c = extent i 
+    let Z :. h :. w :. _ = extent i 
     in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
             ilTexImageC (fromIntegral w) (fromIntegral h) 1 3 
                         (fromIntegral il_RGB) il_UNSIGNED_BYTE (castPtr p))
 fromRepa (RGBA i) =
-    let Z :. h :. w :. c = extent i 
+    let Z :. h :. w :. _ = extent i 
     in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
             ilTexImageC (fromIntegral w) (fromIntegral h) 1 4 
                         (fromIntegral il_RGBA) il_UNSIGNED_BYTE (castPtr p))
