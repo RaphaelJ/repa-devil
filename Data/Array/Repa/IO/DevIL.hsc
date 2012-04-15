@@ -35,7 +35,7 @@
 
 module Data.Array.Repa.IO.DevIL (
     -- * The Image array type 
-      Image
+      Image (..)
     
     -- * The IL monad
     , IL, runIL
@@ -44,7 +44,7 @@ module Data.Array.Repa.IO.DevIL (
     , readImage, writeImage
     ) where
 
-import Control.Applicative ((<$>))
+import Control.Applicative (Applicative, (<$>))
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO (..))
 
@@ -80,14 +80,14 @@ newtype ImageName = ImageName ILuint
 -- /Z :. row :. column :. color channel/. Grey images are 2D repa arrays.
 -- 
 -- The origin (/Z :. 0 :. 0/) is on the lower left point of the image.
-data Image r = RGBA (Array r DIM3 Word8)
-             | RGB (Array r DIM3 Word8)
-             | Grey (Array r DIM2 Word8)
+data Image = RGBA (Array F DIM3 Word8)
+           | RGB (Array F DIM3 Word8)
+           | Grey (Array F DIM2 Word8)
 
 -- | The IL monad. Provides statically-guaranteed access to an initialized IL
 -- context.
 newtype IL a = IL (IO a)
-    deriving (Monad, MonadIO)
+    deriving (Monad, MonadIO, Functor, Applicative)
 
 -- | Running code in the /IL/ monad. This is a simple wrapper over /IO/
 -- that guarantees the DevIL library has been initialized before you run
@@ -106,7 +106,7 @@ runIL (IL a) = ilInit >> a
 -- >    .. operations on x ..
 -- 
 -- /Note:/ The image input type is determined by the filename extension. 
-readImage  :: FilePath -> IL (Image F)
+readImage  :: FilePath -> IL Image
 readImage f = liftIO $ do
     name <- ilGenImageName
     ilBindImage name
@@ -121,7 +121,7 @@ readImage f = liftIO $ do
 -- buffers. You can use 'copyS' or 'copyP' to convert the array.
 -- 
 -- /Note:/ The image output type is determined by the filename extension. 
-writeImage :: FilePath -> Image F -> IL ()
+writeImage :: FilePath -> Image -> IL ()
 writeImage f i = liftIO $ do
     name <- ilGenImageName
     ilBindImage name
@@ -192,7 +192,7 @@ il_UNSIGNED_BYTE = (#const IL_UNSIGNED_BYTE) :: ILenum
 foreign import ccall "ilGetData" ilGetDataC :: IO (Ptr ILubyte)
 
 -- | Puts the current image inside a repa array.
-toRepa :: ImageName -> IO (Image F)
+toRepa :: ImageName -> IO Image
 toRepa name = do
     width' <- ilGetIntegerC il_IMAGE_WIDTH
     height' <- ilGetIntegerC il_IMAGE_HEIGHT
@@ -224,7 +224,7 @@ foreign import ccall "ilTexImage" ilTexImageC
     -> IO ILboolean
 
 -- | Copies the repa array to the current image buffer.
-fromRepa :: Image F -> IO Bool
+fromRepa :: Image -> IO Bool
 fromRepa (RGB i)  =
     let Z :. h :. w :. _ = extent i 
     in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
