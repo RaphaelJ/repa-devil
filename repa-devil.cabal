@@ -28,7 +28,7 @@ Homepage:            https://github.com/RaphaelJ/repa-devil
 License:             BSD3
 License-file:        LICENSE
 Author:              Don Stewart, Raphael Javaux
-Maintainer:          Don Stewart <dons00[at]gmail.com>, Raphael Javaux <raphaeljavaux[at]gmail.com>
+Maintainer:          Raphael Javaux <raphaeljavaux[at]gmail.com>
 Copyright:           Don Stewart (c) 2011, Raphael Javaux (c) 2012
 Category:            Data Structures
 Build-type:          Simple
