@@ -147,8 +147,8 @@ ilInit :: IO ()
 ilInit = do
     ilInitC
     -- By default, origin is undefined and depends on the image type
-    ilOriginFuncC (#const IL_ORIGIN_LOWER_LEFT)
-    ilEnableC (#const IL_ORIGIN_SET)
+    _ <- ilOriginFuncC (#const IL_ORIGIN_LOWER_LEFT)
+    _ <- ilEnableC (#const IL_ORIGIN_SET)
     return ()
 {-# INLINE ilInit #-}
     
@@ -180,14 +180,16 @@ ilLoadImage f = (0 /=) <$> withCString f ilLoadImageC
 
 foreign import ccall "ilGetInteger" ilGetIntegerC :: ILenum -> IO ILint
 
-il_RGB = (#const IL_RGB) :: ILint
-il_RGBA = (#const IL_RGBA) :: ILint
-il_LUMINANCE = (#const IL_LUMINANCE) :: ILint
+il_RGB, il_RGBA, il_LUMINANCE :: ILint
+il_RGB = (#const IL_RGB) 
+il_RGBA = (#const IL_RGBA)
+il_LUMINANCE = (#const IL_LUMINANCE)
 
-il_IMAGE_HEIGHT = (#const IL_IMAGE_HEIGHT) :: ILenum
-il_IMAGE_WIDTH = (#const IL_IMAGE_WIDTH) :: ILenum
-il_IMAGE_FORMAT = (#const IL_IMAGE_FORMAT) :: ILenum
-il_UNSIGNED_BYTE = (#const IL_UNSIGNED_BYTE) :: ILenum
+il_IMAGE_HEIGHT, il_IMAGE_WIDTH, il_IMAGE_FORMAT, il_UNSIGNED_BYTE :: ILenum
+il_IMAGE_HEIGHT = (#const IL_IMAGE_HEIGHT)
+il_IMAGE_WIDTH = (#const IL_IMAGE_WIDTH)
+il_IMAGE_FORMAT = (#const IL_IMAGE_FORMAT)
+il_UNSIGNED_BYTE = (#const IL_UNSIGNED_BYTE)
 
 foreign import ccall "ilGetData" ilGetDataC :: IO (Ptr ILubyte)
 
