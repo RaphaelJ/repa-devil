@@ -1,5 +1,5 @@
 Name:                repa-devil
-Version:             0.3.1
+Version:             0.3.2
 Synopsis:            Support for image reading and writing of Repa arrays using in-place FFI calls
 
 Description:         The repa-image library adds support for reading and
@@ -42,7 +42,7 @@ Library
   Build-depends:       
     base              >= 4.5 && < 5.0,
     repa              >= 3.2.0.0 && < 4.0,
-    transformers      >= 0.2 && < 0.3
+    transformers      >= 0.2 && < 0.4
   
   Build-tools:
     hsc2hs
