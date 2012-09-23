@@ -82,6 +82,8 @@ newtype ImageName = ImageName ILuint
 -- The origin (/Z :. 0 :. 0/) is on the lower left point of the image.
 data Image = RGBA (Array F DIM3 Word8)
            | RGB (Array F DIM3 Word8)
+           | BGRA (Array F DIM3 Word8)
+           | BGR (Array F DIM3 Word8)
            | Grey (Array F DIM2 Word8)
 
 -- | The IL monad. Provides statically-guaranteed access to an initialized IL
@@ -180,9 +182,11 @@ ilLoadImage f = (0 /=) <$> withCString f ilLoadImageC
 
 foreign import ccall "ilGetInteger" ilGetIntegerC :: ILenum -> IO ILint
 
-il_RGB, il_RGBA, il_LUMINANCE :: ILint
+il_RGB, il_RGBA, il_BGR, il_BGRA, il_LUMINANCE :: ILint
 il_RGB = (#const IL_RGB) 
 il_RGBA = (#const IL_RGBA)
+il_BGR = (#const IL_BGR)
+il_BGRA = (#const IL_BGRA)
 il_LUMINANCE = (#const IL_LUMINANCE)
 
 il_IMAGE_HEIGHT, il_IMAGE_WIDTH, il_IMAGE_FORMAT, il_UNSIGNED_BYTE :: ILenum
@@ -213,6 +217,10 @@ toRepa name = do
             RGB  $! fromForeignPtr (Z :. height :. width :. 3) managedPixels
         | format == il_RGBA      =
             RGBA $! fromForeignPtr (Z :. height :. width :. 4) managedPixels
+        | format == il_BGR       =
+            BGR  $! fromForeignPtr (Z :. height :. width :. 3) managedPixels
+        | format == il_BGRA      =
+            BGRA $! fromForeignPtr (Z :. height :. width :. 4) managedPixels
         | format == il_LUMINANCE =
             Grey $! fromForeignPtr (Z :. height :. width) managedPixels
         | otherwise              =
@@ -237,6 +245,16 @@ fromRepa (RGBA i) =
     in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
             ilTexImageC (fromIntegral w) (fromIntegral h) 1 4 
                         (fromIntegral il_RGBA) il_UNSIGNED_BYTE (castPtr p))
+fromRepa (BGR i)  =
+    let Z :. h :. w :. _ = extent i 
+    in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
+            ilTexImageC (fromIntegral w) (fromIntegral h) 1 3 
+                        (fromIntegral il_BGR) il_UNSIGNED_BYTE (castPtr p))
+fromRepa (BGRA i) =
+    let Z :. h :. w :. _ = extent i 
+    in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
+            ilTexImageC (fromIntegral w) (fromIntegral h) 1 4 
+                        (fromIntegral il_BGRA) il_UNSIGNED_BYTE (castPtr p))
 fromRepa (Grey i) =
     let Z :. h :. w = extent i 
     in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
