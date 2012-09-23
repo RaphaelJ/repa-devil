@@ -19,7 +19,7 @@
 --
 -- * Image format parsing is determined by the filepath extension type.
 --
--- * Only RGB, RGBA and Greyscale images are supported.
+-- * Only RGB, RGBA, BGR, BGRA and Greyscale images are supported.
 --
 -- Example: read a .png file into a repa array, and write it out as a .jpg
 --
@@ -36,7 +36,7 @@
 module Data.Array.Repa.IO.DevIL (
     -- * The Image array type 
       Image (..)
-    
+
     -- * The IL monad
     , IL, runIL
 
@@ -76,7 +76,7 @@ newtype ImageName = ImageName ILuint
 
 -- ----------------------------------------------------------------------
 
--- | RGBA and RGB images are 3D repa arrays where indices are 
+-- | RGBA, RGB, BGRA and BGR images are 3D repa arrays where indices are
 -- /Z :. row :. column :. color channel/. Grey images are 2D repa arrays.
 -- 
 -- The origin (/Z :. 0 :. 0/) is on the lower left point of the image.
@@ -107,7 +107,7 @@ runIL (IL a) = ilInit >> a
 -- >    x <- runIL $ readImage "/tmp/x.png"
 -- >    .. operations on x ..
 -- 
--- /Note:/ The image input type is determined by the filename extension. 
+-- /Note:/ The image input type is determined by the filename extension.
 readImage  :: FilePath -> IL Image
 readImage f = liftIO $ do
     name <- ilGenImageName
@@ -122,7 +122,7 @@ readImage f = liftIO $ do
 -- | Writes an 'Image' to a file. The image array must be represented as foreign
 -- buffers. You can use 'copyS' or 'copyP' to convert the array.
 -- 
--- /Note:/ The image output type is determined by the filename extension. 
+-- /Note:/ The image output type is determined by the filename extension.
 writeImage :: FilePath -> Image -> IL ()
 writeImage f i = liftIO $ do
     name <- ilGenImageName
@@ -140,9 +140,9 @@ writeImage f i = liftIO $ do
 
 -- ----------------------------------------------------------------------
 
-foreign import ccall "ilInit" ilInitC :: IO ()
-foreign import ccall "ilOriginFunc" ilOriginFuncC :: ILenum -> IO ILboolean
-foreign import ccall "ilEnable" ilEnableC :: ILenum -> IO ILboolean
+foreign import ccall unsafe "ilInit" ilInitC :: IO ()
+foreign import ccall unsafe "ilOriginFunc" ilOriginFuncC :: ILenum -> IO ILboolean
+foreign import ccall unsafe "ilEnable" ilEnableC :: ILenum -> IO ILboolean
 
 -- | Initialize the library.
 ilInit :: IO ()
@@ -154,7 +154,7 @@ ilInit = do
     return ()
 {-# INLINE ilInit #-}
     
-foreign import ccall "ilGenImages" ilGenImagesC
+foreign import ccall unsafe "ilGenImages" ilGenImagesC
   :: ILsizei -> Ptr ILuint -> IO ()
 
 -- | Allocates a new image name.
@@ -166,21 +166,21 @@ ilGenImageName = do
         return $! ImageName name
 {-# INLINE ilGenImageName #-}
 
-foreign import ccall "ilBindImage" ilBindImageC :: ILuint -> IO ()
+foreign import ccall unsafe "ilBindImage" ilBindImageC :: ILuint -> IO ()
 
 -- | Sets the image name as the current image for processing.
 ilBindImage :: ImageName -> IO ()
 ilBindImage (ImageName name) = ilBindImageC name
 {-# INLINE ilBindImage #-}
 
-foreign import ccall "ilLoadImage" ilLoadImageC :: CString -> IO ILboolean
+foreign import ccall unsafe "ilLoadImage" ilLoadImageC :: CString -> IO ILboolean
 
 -- | Loads the image as the current DevIL image name.
 ilLoadImage :: FilePath -> IO Bool
 ilLoadImage f = (0 /=) <$> withCString f ilLoadImageC
 {-# INLINE ilLoadImage #-}
 
-foreign import ccall "ilGetInteger" ilGetIntegerC :: ILenum -> IO ILint
+foreign import ccall unsafe "ilGetInteger" ilGetIntegerC :: ILenum -> IO ILint
 
 il_RGB, il_RGBA, il_BGR, il_BGRA, il_LUMINANCE :: ILint
 il_RGB = (#const IL_RGB) 
@@ -195,7 +195,7 @@ il_IMAGE_WIDTH = (#const IL_IMAGE_WIDTH)
 il_IMAGE_FORMAT = (#const IL_IMAGE_FORMAT)
 il_UNSIGNED_BYTE = (#const IL_UNSIGNED_BYTE)
 
-foreign import ccall "ilGetData" ilGetDataC :: IO (Ptr ILubyte)
+foreign import ccall unsafe "ilGetData" ilGetDataC :: IO (Ptr ILubyte)
 
 -- | Puts the current image inside a repa array.
 toRepa :: ImageName -> IO Image
@@ -205,10 +205,10 @@ toRepa name = do
     let (width, height) = (fromIntegral width', fromIntegral height')
     format <- ilGetIntegerC il_IMAGE_FORMAT
     pixels <- ilGetDataC
-    
+
     -- Destroys the image when the array will be garbage collected
     managedPixels <- newForeignPtr pixels (ilDeleteImage name) 
-    
+
     return $! imageFromFormat format width height managedPixels
   where
     -- Create an 'Image' object with the right format.
@@ -227,7 +227,7 @@ toRepa name = do
             error "Unsupported image format."
     {-# INLINE imageFromFormat #-}
 
-foreign import ccall "ilTexImage" ilTexImageC
+foreign import ccall unsafe "ilTexImage" ilTexImageC
     :: ILuint -> ILuint -> ILuint   -- w h depth
     -> ILubyte -> ILenum -> ILenum  -- numberOfChannels format type
     -> Ptr ()                       -- data (copy from this pointer)
@@ -236,33 +236,33 @@ foreign import ccall "ilTexImage" ilTexImageC
 -- | Copies the repa array to the current image buffer.
 fromRepa :: Image -> IO Bool
 fromRepa (RGB i)  =
-    let Z :. h :. w :. _ = extent i 
+    let Z :. h :. w :. _ = extent i
     in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
-            ilTexImageC (fromIntegral w) (fromIntegral h) 1 3 
+            ilTexImageC (fromIntegral w) (fromIntegral h) 1 3
                         (fromIntegral il_RGB) il_UNSIGNED_BYTE (castPtr p))
 fromRepa (RGBA i) =
-    let Z :. h :. w :. _ = extent i 
+    let Z :. h :. w :. _ = extent i
     in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
-            ilTexImageC (fromIntegral w) (fromIntegral h) 1 4 
+            ilTexImageC (fromIntegral w) (fromIntegral h) 1 4
                         (fromIntegral il_RGBA) il_UNSIGNED_BYTE (castPtr p))
 fromRepa (BGR i)  =
-    let Z :. h :. w :. _ = extent i 
+    let Z :. h :. w :. _ = extent i
     in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
             ilTexImageC (fromIntegral w) (fromIntegral h) 1 3 
                         (fromIntegral il_BGR) il_UNSIGNED_BYTE (castPtr p))
 fromRepa (BGRA i) =
-    let Z :. h :. w :. _ = extent i 
+    let Z :. h :. w :. _ = extent i
     in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
             ilTexImageC (fromIntegral w) (fromIntegral h) 1 4 
                         (fromIntegral il_BGRA) il_UNSIGNED_BYTE (castPtr p))
 fromRepa (Grey i) =
-    let Z :. h :. w = extent i 
+    let Z :. h :. w = extent i
     in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
             ilTexImageC (fromIntegral w) (fromIntegral h) 1 1 
                         (fromIntegral il_LUMINANCE) il_UNSIGNED_BYTE 
                         (castPtr p))
 
-foreign import ccall "ilSaveImage" ilSaveImageC :: CString -> IO ILboolean
+foreign import ccall unsafe "ilSaveImage" ilSaveImageC :: CString -> IO ILboolean
 
 -- | Saves the current image.
 ilSaveImage :: FilePath -> IO Bool
@@ -270,7 +270,7 @@ ilSaveImage file = do
     (0 /=) <$> withCString file ilSaveImageC
 {-# INLINE ilSaveImage #-}
 
-foreign import ccall "ilDeleteImages" ilDeleteImagesC
+foreign import ccall unsafe "ilDeleteImages" ilDeleteImagesC
     :: ILsizei -> Ptr ILuint -> IO ()
 
 -- | Releases an image with its name.

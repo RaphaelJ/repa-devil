@@ -1,5 +1,5 @@
 Name:                repa-devil
-Version:             0.3.2
+Version:             0.3.2.1
 Synopsis:            Support for image reading and writing of Repa arrays using in-place FFI calls
 
 Description:         The repa-image library adds support for reading and
@@ -13,7 +13,7 @@ Description:         The repa-image library adds support for reading and
                      interface. DevIL can load, save, convert,
                      manipulate, filter and display a wide variety of
                      image formats, including:
-                     . 
+                     .
                      * BMP, ICO, JPG, PNG, PNM, TGA, TIF, GIF, EXIF and many more.
                      .
                      /References:/
@@ -38,22 +38,22 @@ Cabal-version:       >=1.6
 Library
   Exposed-modules:
     Data.Array.Repa.IO.DevIL
-  
-  Build-depends:       
-    base              >= 4.5 && < 5.0,
+
+  Build-depends:
+    base              == 4.*,
     repa              >= 3.2.0.0 && < 4.0,
     transformers      >= 0.2 && < 0.4
-  
+
   Build-tools:
     hsc2hs
-    
+
   GHC-Options: -O2 -Wall
-  
+
   Extensions:
     CPP,
     ForeignFunctionInterface
 
-  Extra-Libraries: 
+  Extra-Libraries:
     IL
 
 source-repository head
