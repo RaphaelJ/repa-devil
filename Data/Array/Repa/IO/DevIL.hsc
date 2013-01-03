@@ -72,7 +72,8 @@ type ILint     = #type ILint
 type ILubyte   = #type ILubyte
 
 -- DevIL uses unsigned integers as names for each image in processing.
-newtype ImageName = ImageName ILuint
+newtype ImageName = ImageName ILuint 
+    deriving (Show)
 
 -- ----------------------------------------------------------------------
 
@@ -108,7 +109,7 @@ runIL (IL a) = ilInit >> a
 -- >    .. operations on x ..
 -- 
 -- /Note:/ The image input type is determined by the filename extension.
-readImage  :: FilePath -> IL Image
+readImage :: FilePath -> IL Image
 readImage f = liftIO $ do
     name <- ilGenImageName
     ilBindImage name
@@ -153,7 +154,7 @@ ilInit = do
     _ <- ilEnableC (#const IL_ORIGIN_SET)
     return ()
 {-# INLINE ilInit #-}
-    
+
 foreign import ccall unsafe "ilGenImages" ilGenImagesC
   :: ILsizei -> Ptr ILuint -> IO ()
 
@@ -182,19 +183,24 @@ ilLoadImage f = (0 /=) <$> withCString f ilLoadImageC
 
 foreign import ccall unsafe "ilGetInteger" ilGetIntegerC :: ILenum -> IO ILint
 
-il_RGB, il_RGBA, il_BGR, il_BGRA, il_LUMINANCE :: ILint
-il_RGB = (#const IL_RGB) 
+il_RGB, il_RGBA, il_BGR, il_BGRA, il_LUMINANCE :: ILenum
+il_RGB = (#const IL_RGB)
 il_RGBA = (#const IL_RGBA)
 il_BGR = (#const IL_BGR)
 il_BGRA = (#const IL_BGRA)
 il_LUMINANCE = (#const IL_LUMINANCE)
 
-il_IMAGE_HEIGHT, il_IMAGE_WIDTH, il_IMAGE_FORMAT, il_UNSIGNED_BYTE :: ILenum
+il_IMAGE_HEIGHT, il_IMAGE_WIDTH :: ILenum
+il_IMAGE_FORMAT, il_IMAGE_TYPE :: ILenum
+il_UNSIGNED_BYTE :: ILenum
 il_IMAGE_HEIGHT = (#const IL_IMAGE_HEIGHT)
 il_IMAGE_WIDTH = (#const IL_IMAGE_WIDTH)
 il_IMAGE_FORMAT = (#const IL_IMAGE_FORMAT)
+il_IMAGE_TYPE = (#const IL_IMAGE_TYPE)
 il_UNSIGNED_BYTE = (#const IL_UNSIGNED_BYTE)
 
+foreign import ccall unsafe "ilConvertImage" ilConvertImageC
+    :: ILenum -> ILenum -> IO ILboolean
 foreign import ccall unsafe "ilGetData" ilGetDataC :: IO (Ptr ILubyte)
 
 -- | Puts the current image inside a repa array.
@@ -204,28 +210,44 @@ toRepa name = do
     height' <- ilGetIntegerC il_IMAGE_HEIGHT
     let (width, height) = (fromIntegral width', fromIntegral height')
     format <- ilGetIntegerC il_IMAGE_FORMAT
-    pixels <- ilGetDataC
+    pixelType <- fromIntegral <$> ilGetIntegerC il_IMAGE_TYPE
 
-    -- Destroys the image when the array will be garbage collected
-    managedPixels <- newForeignPtr pixels (ilDeleteImage name) 
-
-    return $! imageFromFormat format width height managedPixels
+    case fromIntegral format :: ILenum of
+        (#const IL_RGB) -> do
+            convert il_RGB pixelType
+            RGB <$> pixelsToArray (Z :. height :. width :. 3)
+        (#const IL_RGBA) -> do
+            convert il_RGBA pixelType
+            RGBA <$> pixelsToArray (Z :. height :. width :. 4)
+        (#const IL_BGR) -> do
+            convert il_BGR pixelType
+            BGR <$> pixelsToArray (Z :. height :. width :. 3)
+        (#const IL_BGRA) -> do
+            convert il_BGRA pixelType
+            BGRA <$> pixelsToArray (Z :. height :. width :. 4)
+        (#const IL_LUMINANCE) -> do
+            convert il_LUMINANCE pixelType
+            Grey <$> pixelsToArray (Z :. height :. width)
+        _ -> do
+            ilConvertImage il_RGBA il_UNSIGNED_BYTE
+            RGBA <$> pixelsToArray (Z :. height :. width :. 4)
   where
-    -- Create an 'Image' object with the right format.
-    imageFromFormat format width height managedPixels
-        | format == il_RGB       =
-            RGB  $! fromForeignPtr (Z :. height :. width :. 3) managedPixels
-        | format == il_RGBA      =
-            RGBA $! fromForeignPtr (Z :. height :. width :. 4) managedPixels
-        | format == il_BGR       =
-            BGR  $! fromForeignPtr (Z :. height :. width :. 3) managedPixels
-        | format == il_BGRA      =
-            BGRA $! fromForeignPtr (Z :. height :. width :. 4) managedPixels
-        | format == il_LUMINANCE =
-            Grey $! fromForeignPtr (Z :. height :. width) managedPixels
-        | otherwise              =
-            error "Unsupported image format."
-    {-# INLINE imageFromFormat #-}
+    -- Converts the image to the given format if the pixel type isn't Word8.
+    convert format pixelType
+        | pixelType == il_UNSIGNED_BYTE = return ()
+        | otherwise = ilConvertImage format il_UNSIGNED_BYTE
+
+    -- Converts the C vector of unsigned bytes to a garbage collected repa 
+    -- array.
+    pixelsToArray dstExtent = do
+        pixels <- ilGetDataC
+        managedPixels <- newForeignPtr pixels (ilDeleteImage name)
+        return $! fromForeignPtr dstExtent managedPixels
+
+    ilConvertImage format pixelType = do
+        success <- (0 /=) <$> ilConvertImageC format pixelType
+        when (not success) $
+                error "Unable to convert the image to a supported format."
 
 foreign import ccall unsafe "ilTexImage" ilTexImageC
     :: ILuint -> ILuint -> ILuint   -- w h depth
@@ -248,17 +270,17 @@ fromRepa (RGBA i) =
 fromRepa (BGR i)  =
     let Z :. h :. w :. _ = extent i
     in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
-            ilTexImageC (fromIntegral w) (fromIntegral h) 1 3 
+            ilTexImageC (fromIntegral w) (fromIntegral h) 1 3
                         (fromIntegral il_BGR) il_UNSIGNED_BYTE (castPtr p))
 fromRepa (BGRA i) =
     let Z :. h :. w :. _ = extent i
     in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
-            ilTexImageC (fromIntegral w) (fromIntegral h) 1 4 
+            ilTexImageC (fromIntegral w) (fromIntegral h) 1 4
                         (fromIntegral il_BGRA) il_UNSIGNED_BYTE (castPtr p))
 fromRepa (Grey i) =
     let Z :. h :. w = extent i
     in (0 /=) <$> (withForeignPtr (toForeignPtr i) $ \p ->
-            ilTexImageC (fromIntegral w) (fromIntegral h) 1 1 
+            ilTexImageC (fromIntegral w) (fromIntegral h) 1 1
                         (fromIntegral il_LUMINANCE) il_UNSIGNED_BYTE 
                         (castPtr p))
 
