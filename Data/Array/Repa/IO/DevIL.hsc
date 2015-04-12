@@ -45,7 +45,7 @@ module Data.Array.Repa.IO.DevIL (
     ) where
 
 #if __GLASGOW_HASKELL__ < 710
-    import Control.Applicative ((<$>))
+import Control.Applicative ((<$>))
 #endif
 
 import Control.Monad (when)
