@@ -40,9 +40,13 @@ module Data.Array.Repa.IO.DevIL (
     -- * The IL monad
     , IL, runIL
 
-    -- * Image IO 
+    -- * Image IO
     , readImage, writeImage
     ) where
+
+#if __GLASGOW_HASKELL__ < 710
+    import Control.Applicative ((<$>))
+#endif
 
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO (..))
