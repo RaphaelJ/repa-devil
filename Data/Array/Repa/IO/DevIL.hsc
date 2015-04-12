@@ -44,7 +44,6 @@ module Data.Array.Repa.IO.DevIL (
     , readImage, writeImage
     ) where
 
-import Control.Applicative (Applicative, (<$>))
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO (..))
 
